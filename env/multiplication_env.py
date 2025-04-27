@@ -1,5 +1,6 @@
 import random
 from utils.vocab import Vocab
+from env.teacher_two_two import MultiplicationTeacherTwoTwo
 
 class MultiplicationEnvTwoTwo:
     def __init__(self):
@@ -17,6 +18,10 @@ class MultiplicationEnvTwoTwo:
         self.allowed_actions = self.steps + ["do nothing"]
         self.current_step = 0
         self.done = False
+
+        # NEW: Create teacher instance
+        self.teacher = MultiplicationTeacherTwoTwo(self.steps, self.correct_answer, self.A, self.B)
+
         return self.get_state()
 
     def generate_steps(self):
@@ -68,27 +73,20 @@ class MultiplicationEnvTwoTwo:
     def get_state(self):
         return self.problem_text, self.chain_text
 
-    def step(self, action_index):
-        action_text = self.allowed_actions[action_index]
+    def step(self, action_text):
         if self.done:
             raise Exception("Episode is done. Please reset.")
 
         self.chain.append(action_text)
         self.chain_text = (self.chain_text + " " + action_text).strip()
 
-        reward = 0.0
-        done = False
-
-        if self.current_step < len(self.steps):
-            expected_step = self.steps[self.current_step]
-            if action_text.strip().lower() == expected_step.strip().lower():
-                reward = 5.0
-            else:
-                reward = -2.0
-
         self.current_step += 1
-        if self.current_step >= len(self.steps):
-            done = True
+        done = self.current_step >= len(self.steps)
+
+        if done:
+            feedback, reward = self.teacher.evaluate_solution(self.chain)
             self.done = True
+        else:
+            feedback, reward = "", 0.0  # intermediate steps get no reward
 
         return self.get_state(), reward, done

@@ -15,7 +15,9 @@ def train_agent(num_episodes=5000):
         problem_text, chain_text = state
         while not done:
             action_index = agent.choose_action(problem_text, chain_text, env.allowed_actions)
-            next_state, reward, done = env.step(action_index)
+            action_text = env.allowed_actions[action_index]
+            next_state, reward, done = env.step(action_text)
+
             agent.accumulate_loss(reward)
             total_proc_reward += reward
             problem_text, chain_text = next_state
