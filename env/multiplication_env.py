@@ -80,13 +80,21 @@ class MultiplicationEnvTwoTwo:
         self.chain.append(action_text)
         self.chain_text = (self.chain_text + " " + action_text).strip()
 
+        reward = 0.0
+        current_step = len(self.chain) - 1
+        if current_step < len(self.steps):
+            expected_action = self.steps[current_step]
+            if action_text.strip().lower() == expected_action.strip().lower():
+                reward = 5.0
+            else:
+                reward = -2.0
+
         self.current_step += 1
-        done = self.current_step >= len(self.steps)
+        done = (self.current_step >= len(self.steps))
 
         if done:
-            feedback, reward = self.teacher.evaluate_solution(self.chain)
+            feedback, teacher_reward = self.teacher.evaluate_solution(self.chain)
+            reward += teacher_reward
             self.done = True
-        else:
-            feedback, reward = "", 0.0  # intermediate steps get no reward
 
         return self.get_state(), reward, done
