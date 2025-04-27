@@ -1,7 +1,9 @@
 import random
+from utils.vocab import Vocab
 
 class MultiplicationEnvTwoTwo:
     def __init__(self):
+        self.vocab = Vocab()
         self.reset()
 
     def reset(self):
@@ -12,6 +14,7 @@ class MultiplicationEnvTwoTwo:
         self.chain = []
         self.chain_text = ""
         self.steps = self.generate_steps()
+        self.allowed_actions = self.steps + ["do nothing"]
         self.current_step = 0
         self.done = False
         return self.get_state()
@@ -23,43 +26,65 @@ class MultiplicationEnvTwoTwo:
         tens_B = self.B // 10
 
         steps = []
+
+        # First row: multiply A by ones place of B
+        # Ones place
         P1 = ones_A * ones_B
+        d1 = P1 % 10
         carry1 = P1 // 10
-        steps.append(f"multiply {ones_A} by {ones_B} output {P1 % 10} carry {carry1}")
+        steps.append(f"multiply {ones_A} by {ones_B} output {d1} carry {carry1}")
 
+        # Tens place
         P2 = tens_A * ones_B + carry1
+        d2 = P2 % 10
         carry2 = P2 // 10
-        steps.append(f"multiply {tens_A} by {ones_B} output {P2 % 10} carry {carry2}")
+        steps.append(f"multiply {tens_A} by {ones_B} output {d2} carry {carry2}")
 
+        # Remember the first partial result (first row)
+        first_row = d1 + d2 * 10 + carry2 * 100  # Build number like 161
+
+        # Second row: multiply A by tens place of B
+        # Ones place
         P3 = ones_A * tens_B
+        d3 = P3 % 10
         carry3 = P3 // 10
-        steps.append(f"multiply {ones_A} by {tens_B} output {P3 % 10} carry {carry3}")
+        steps.append(f"multiply {ones_A} by {tens_B} output {d3} carry {carry3}")
 
+        # Tens place
         P4 = tens_A * tens_B + carry3
+        d4 = P4 % 10
         carry4 = P4 // 10
-        steps.append(f"multiply {tens_A} by {tens_B} output {P4 % 10} carry {carry4}")
+        steps.append(f"multiply {tens_A} by {tens_B} output {d4} carry {carry4}")
 
-        steps.append("output final result")
+        # Remember second partial result (shifted)
+        second_row = (d3 + d4 * 10 + carry4 * 100) * 10  # shift left by one digit
+
+        steps.append(f"add partial results {first_row} and {second_row}")
+
+        steps.append(f"output final result")
+
         return steps
 
     def get_state(self):
         return self.problem_text, self.chain_text
 
-    def step(self, action_text):
+    def step(self, action_index):
+        action_text = self.allowed_actions[action_index]
         if self.done:
             raise Exception("Episode is done. Please reset.")
 
         self.chain.append(action_text)
         self.chain_text = (self.chain_text + " " + action_text).strip()
+
         reward = 0.0
         done = False
 
         if self.current_step < len(self.steps):
             expected_step = self.steps[self.current_step]
             if action_text.strip().lower() == expected_step.strip().lower():
-                reward = 1.0
+                reward = 5.0
             else:
-                reward = -0.5
+                reward = -2.0
 
         self.current_step += 1
         if self.current_step >= len(self.steps):
