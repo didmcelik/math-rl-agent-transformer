@@ -6,13 +6,12 @@ class TransformerPolicy(nn.Module):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, d_model)
         self.transformer = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model, nhead),
+            nn.TransformerEncoderLayer(d_model, nhead, batch_first=False),
             num_layers
         )
-        self.fc_out = nn.Linear(d_model, vocab_size)
+
 
     def forward(self, src):
-        embedded = self.embedding(src)
-        output = self.transformer(embedded)
-        logits = self.fc_out(output)
-        return logits
+        embedded = self.embedding(src)  # [seq_len, batch_size, d_model]
+        output = self.transformer(embedded)  # [seq_len, batch_size, d_model]
+        return output
