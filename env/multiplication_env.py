@@ -15,7 +15,7 @@ class MultiplicationEnvTwoTwo:
         self.chain = []
         self.chain_text = ""
         self.steps = self.generate_steps()
-        self.allowed_actions = self.steps + ["do nothing"]
+        self.allowed_actions = self.steps
         self.current_step = 0
         self.done = False
 
@@ -32,40 +32,48 @@ class MultiplicationEnvTwoTwo:
 
         steps = []
 
-        # First row: multiply A by ones place of B
-        # Ones place
+        # First row
         P1 = ones_A * ones_B
-        d1 = P1 % 10
+        digit1 = P1 % 10
         carry1 = P1 // 10
-        steps.append(f"multiply {ones_A} by {ones_B} output {d1} carry {carry1}")
+        steps.append(f"multiply A_ones {ones_A} by B_ones {ones_B} -> output digit1 {digit1}, carry1 {carry1}")
 
-        # Tens place
-        P2 = tens_A * ones_B + carry1
-        d2 = P2 % 10
-        carry2 = P2 // 10
-        steps.append(f"multiply {tens_A} by {ones_B} output {d2} carry {carry2}")
+        P2 = tens_A * ones_B
+        d2_intermediate = P2
+        d2_total = d2_intermediate + carry1
+        digit2 = d2_total % 10
+        carry2 = d2_total // 10
+        steps.append(
+            f"multiply A_tens {tens_A} by B_ones {ones_B} and add carry1 {carry1} -> output digit2 {digit2}, carry2 {carry2}")
 
-        # Remember the first partial result (first row)
-        first_row = d1 + d2 * 10 + carry2 * 100  # Build number like 161
+        # Build first partial result
+        first_row = carry2 * 100 + digit2 * 10 + digit1
+        steps.append(
+            f"build first partial result using carry2 {carry2}, digit2 {digit2}, and digit1 {digit1} -> {first_row}")
 
-        # Second row: multiply A by tens place of B
-        # Ones place
+        # Second row
         P3 = ones_A * tens_B
-        d3 = P3 % 10
+        digit3 = P3 % 10
         carry3 = P3 // 10
-        steps.append(f"multiply {ones_A} by {tens_B} output {d3} carry {carry3}")
+        steps.append(f"multiply A_ones {ones_A} by B_tens {tens_B} -> output digit3 {digit3}, carry3 {carry3}")
 
-        # Tens place
-        P4 = tens_A * tens_B + carry3
-        d4 = P4 % 10
-        carry4 = P4 // 10
-        steps.append(f"multiply {tens_A} by {tens_B} output {d4} carry {carry4}")
+        P4 = tens_A * tens_B
+        d4_intermediate = P4
+        d4_total = d4_intermediate + carry3
+        digit4 = d4_total % 10
+        carry4 = d4_total // 10
+        steps.append(
+            f"multiply A_tens {tens_A} by B_tens {tens_B} and add carry3 {carry3} -> output digit4 {digit4}, carry4 {carry4}")
 
-        # Remember second partial result (shifted)
-        second_row = (d3 + d4 * 10 + carry4 * 100) * 10  # shift left by one digit
+        # Build second partial result
+        second_row = (carry4 * 100 + digit4 * 10 + digit3) * 10
+        steps.append(
+            f"build second partial result using carry4 {carry4}, digit4 {digit4}, and digit3 {digit3} -> {second_row}")
 
+        # Add partial results
         steps.append(f"add partial results {first_row} and {second_row}")
 
+        # Final result
         steps.append(f"output final result")
 
         return steps
@@ -88,6 +96,9 @@ class MultiplicationEnvTwoTwo:
                 reward = 5.0
             else:
                 reward = -2.0
+        else:
+            # Çoktan tüm adımlar bitti, ama agent hâlâ aksiyon basıyor
+            reward = -5.0
 
         self.current_step += 1
         done = (self.current_step >= len(self.steps))
@@ -98,3 +109,12 @@ class MultiplicationEnvTwoTwo:
             self.done = True
 
         return self.get_state(), reward, done
+
+
+
+def test():
+    env = MultiplicationEnvTwoTwo()
+    env.reset()
+    for action in env.allowed_actions:
+        print(action)
+

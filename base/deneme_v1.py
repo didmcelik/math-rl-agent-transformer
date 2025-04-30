@@ -3,39 +3,28 @@ import torch.nn as nn
 import torch.optim as optim
 import random
 import tkinter as tk
-
 #############################################
 # Global Vocabulary and Text Processing
 #############################################
 
-# Vocabulary covers key procedural words and digits.
 vocab = [
-           "multiply", "add", "carry", "and", "combine", "do", "nothing", "subtract",
-           "output", "ones", "digit", "tens", "hundreds"
-       ] + [str(i) for i in range(10)]
+    "multiply", "add", "carry", "and", "combine", "do", "nothing", "subtract",
+    "output", "ones", "digit", "tens", "hundreds"
+] + [str(i) for i in range(10)]
 vocab = [w.lower() for w in vocab]
 vocab_size = len(vocab)
 vocab_dict = {word: idx for idx, word in enumerate(vocab)}
 
-
 def preprocess(text):
-   text = text.lower()
-   for symbol in [":", "*", "+", "-", "="]:
-       text = text.replace(symbol, f" {symbol} ")
-   return text.split()
-
-
-def encode_text(text):
-   tokens = preprocess(text)
-   vec = torch.zeros(vocab_size)
-   for token in tokens:
-       if token in vocab_dict:
-           vec[vocab_dict[token]] += 1.0
-   return vec
-
+    text = text.lower()
+    for symbol in [":", "*", "+", "-", "="]:
+        text = text.replace(symbol, f" {symbol} ")
+    return text.split()
 
 def encode_state_text(problem_text, chain_text):
-   return torch.cat([encode_text(problem_text), encode_text(chain_text)])
+    tokens = preprocess(problem_text + " " + chain_text)
+    token_ids = [vocab_dict[token] for token in tokens if token in vocab_dict]
+    return torch.tensor(token_ids, dtype=torch.long)
 
 
 #############################################
@@ -123,6 +112,7 @@ class MultiplicationTeacherThree:
        else:
            feedback = f"Procedure incorrect. Expected: {self.correct_steps}, but got: {chain}."
        return feedback, reward
+
 
 
 class MultiplicationEnvThree:
@@ -269,6 +259,62 @@ class AdditionEnvSimple:
 
 
 #############################################
+# Transformer Policy Network
+#############################################
+
+class TransformerPolicyNetwork(nn.Module):
+    def __init__(self, vocab_size, d_model=64, num_actions=7):
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, d_model)
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model, nhead=4, dim_feedforward=d_model * 4, batch_first=True
+        )
+        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=2)
+        self.output_layer = nn.Linear(d_model, num_actions)
+
+    def forward(self, input_tokens):
+        embedded = self.embedding(input_tokens)
+        transformer_out = self.transformer(embedded)
+        pooled = transformer_out.mean(dim=1)
+        logits = self.output_layer(pooled)
+        return logits
+
+#############################################
+# RL Agent
+#############################################
+
+class RLAgentSimple:
+    def __init__(self, lr=1e-3, vocab_size=vocab_size, d_model=64, num_actions=7):
+        self.policy_net = TransformerPolicyNetwork(vocab_size=vocab_size, d_model=d_model, num_actions=num_actions)
+        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr)
+        self.episode_log_probs = []
+        self.cumulative_loss = 0.0
+
+    def choose_action(self, state_tokens, env):
+        state_tokens = state_tokens.unsqueeze(0)
+        logits = self.policy_net(state_tokens)
+        probs = torch.softmax(logits, dim=-1)
+        dist = torch.distributions.Categorical(probs)
+        action = dist.sample()
+        self.episode_log_probs.append(dist.log_prob(action.squeeze()))
+        return action.item()
+
+    def accumulate_loss(self, reward):
+        if self.episode_log_probs:
+            self.cumulative_loss += -self.episode_log_probs[-1] * reward
+
+    def finalize_episode(self, final_reward):
+        bonus = sum([-lp * final_reward for lp in self.episode_log_probs])
+        self.cumulative_loss += bonus
+        self.optimizer.zero_grad()
+        self.cumulative_loss.backward()
+        self.optimizer.step()
+        self.episode_log_probs = []
+        self.cumulative_loss = 0.0
+
+
+
+#############################################
 # Composite Environment (Randomly Choose Task)
 #############################################
 
@@ -279,13 +325,10 @@ class CompositeMathEnv:
        self.reset()
 
    def reset(self):
-       #if random.random() < 0.5:
+       #self.task = "add"
+       #self.env = AdditionEnvSimple()
        self.task = "mul"
        self.env = MultiplicationEnvThree()
-
-       #else:
-         #  self.task = "add"
-        #   self.env = AdditionEnvSimple()
        return self.env.get_state()
 
    def get_state(self):
@@ -295,74 +338,37 @@ class CompositeMathEnv:
        return self.env.step(action_index)
 
 
-#############################################
-# Policy Network (for Procedure Learning)
-#############################################
-
-class PolicyNetwork(nn.Module):
-   def __init__(self, input_dim, hidden_dim, output_dim):
-       """
-       Input: concatenation of state vector (input_dim) and one-hot action vector (output_dim).
-       Output: scalar score.
-       """
-       super(PolicyNetwork, self).__init__()
-       self.fc1 = nn.Linear(input_dim + output_dim, hidden_dim)
-       self.fc2 = nn.Linear(hidden_dim, 1)
-
-   def forward(self, state_action):
-       x = torch.relu(self.fc1(state_action))
-       return self.fc2(x)
-
 
 #############################################
-# RL Agent (Procedure Learning Only)
+# Training Loop
 #############################################
+"""
+def train_agent(num_episodes=5000):
+    env = CompositeMathEnv()
+    agent = RLAgentSimple()
+    for episode in range(num_episodes):
+        state = env.reset()
+        done = False
+        total_reward = 0.0
+        while not done:
+            action = agent.choose_action(state, env)
+            state, reward, done, _ = env.step(action)
+            agent.accumulate_loss(reward)
+            total_reward += reward
 
-class RLAgentSimple:
-   def __init__(self, lr=1e-3, state_dim=2 * vocab_size, num_actions=5):
-       self.num_actions = num_actions
-       self.state_dim = state_dim
-       self.policy_net = PolicyNetwork(input_dim=state_dim, hidden_dim=64, output_dim=num_actions)
-       self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr)
-       self.episode_log_probs = []
-       self.cumulative_loss = 0.0
-
-   def choose_action(self, state, env):
-       action_scores = []
-       for action_index in range(env.num_actions):
-           action_tensor = torch.zeros(env.num_actions)
-           action_tensor[action_index] = 1.0
-           input_tensor = torch.cat([state, action_tensor])
-           score = self.policy_net(input_tensor)
-           action_scores.append(score)
-       scores_tensor = torch.stack(action_scores).view(-1)
-       probs = torch.softmax(scores_tensor, dim=0)
-       dist = torch.distributions.Categorical(probs)
-       action = dist.sample()
-       self.episode_log_probs.append(dist.log_prob(action))
-       return action.item()
-
-   def accumulate_loss(self, reward):
-       if self.episode_log_probs:
-           self.cumulative_loss += -self.episode_log_probs[-1] * reward
-
-   def finalize_episode(self, final_reward):
-       bonus = sum([-lp * final_reward for lp in self.episode_log_probs])
-       self.cumulative_loss += bonus
-       self.optimizer.zero_grad()
-       self.cumulative_loss.backward()
-       self.optimizer.step()
-       self.episode_log_probs = []
-       self.cumulative_loss = 0.0
+        teacher = env.env.teacher
+        teacher_feedback, teacher_reward = teacher.evaluate_solution(env.env.chain)
+        agent.finalize_episode(total_reward)
+        if (episode + 1) % 100 == 0:
+            computed = teacher.compute_sum_from_chain(env.env.chain)
+            print(f"Episode {episode + 1} [{env.task}],  Teacher Reward: {teacher_reward:.2f}, , Total Reward: {total_reward:.2f} Computed: {computed}, True: {env.env.correct_answer}")
 
 
-#############################################
-# Training Loop (Composite)
-#############################################
-
+    return agent
+"""
 def train_agent(num_episodes=5000):
    env = CompositeMathEnv()
-   agent = RLAgentSimple(lr=1e-3, state_dim=2 * vocab_size, num_actions=env.env.num_actions)
+   agent = RLAgentSimple()
    for episode in range(num_episodes):
        state = env.reset()
        done = False
@@ -391,6 +397,21 @@ def train_agent(num_episodes=5000):
            print(
                f"Episode {episode + 1} [{env.task}], Proc Reward: {total_proc_reward:.2f}, Teacher Reward: {teacher_reward:.2f}, Computed: {computed}, True: {env.env.correct_answer}")
    return agent
+
+
+def test_agent(agent, num_tests=5):
+    env = AdditionEnvSimple()
+    for _ in range(num_tests):
+        state = env.reset()
+        done = False
+        print(f"Test Problem: {env.problem_text}")
+        while not done:
+            action = agent.choose_action(state, env)
+            print(f"Action Taken: {env.allowed_actions[action]}")
+            state, reward, done, _ = env.step(action)
+        print("Correct Answer:", env.correct_answer)
+        print("Agent Chain:", env.chain)
+        print()
 
 
 #############################################
@@ -467,15 +488,9 @@ class CompositeApp(tk.Tk):
        self.problem_label.config(text=self.env.env.problem_text)
 
 
-#############################################
-# Main Execution
-#############################################
 
-if __name__ == '__main__':
-   print(
-       "Training composite RL agent for addition and three-digit multiplication procedure (fully learned procedure without explicit arithmetic)...")
-   trained_agent = train_agent(num_episodes=20000)
-   print("Training complete. Launching GUI.")
-   app = CompositeApp(trained_agent)
-   app.mainloop()
-
+if __name__ == "__main__":
+    trained_agent = train_agent(num_episodes=10000)
+    test_agent(trained_agent, num_tests=5)
+    app = CompositeApp(trained_agent)
+    app.mainloop()

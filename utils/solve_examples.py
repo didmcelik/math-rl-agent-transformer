@@ -1,28 +1,26 @@
-import pickle
-from env.multiplication_env import MultiplicationEnvTwoTwo
-from train.train_agent import train_agent
 
+import torch
+from env.multiplication_env import MultiplicationEnvTwoTwo
 
 
 def solve_examples(agent, num_examples=5):
-    from env.multiplication_env import MultiplicationEnvTwoTwo
-
+    env = MultiplicationEnvTwoTwo()
     for example in range(num_examples):
-        print("\n" + "=" * 40)
-        env = MultiplicationEnvTwoTwo()
-        problem_text, chain_text = env.reset()
-        print(f"Problem: {env.problem_text} (True Answer: {env.correct_answer})")
-
+        print("\n" + "="*40)
+        problem_text, _ = env.reset()
+        print(f"Problem: {problem_text} (True Answer: {env.correct_answer})")
         done = False
+        state = (problem_text, "")
         steps = []
 
         while not done:
-            action_index = agent.choose_action(problem_text, chain_text, env.steps + ["do nothing"])
-            action_text = (env.steps + ["do nothing"])[action_index]
+            problem_text, chain_text = state
+            action_index = agent.choose_action(problem_text, chain_text, env.allowed_actions)
+            action_text = env.allowed_actions[action_index]
             steps.append(action_text)
-            (problem_text, chain_text), reward, done = env.step(action_index)
+            state, reward, done = env.step(action_text)
 
         print("Agent's Steps:")
         for step in steps:
-            print(" -", step)
-        print("=" * 40)
+            print(f" - {step}")
+        print("="*40)
