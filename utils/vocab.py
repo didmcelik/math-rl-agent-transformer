@@ -1,30 +1,28 @@
-class Vocab:
-    def __init__(self):
-        self.token2idx = {}
-        self.idx2token = {}
-        self.build_vocab()
+import torch
 
-    def build_vocab(self):
-        base_tokens = [
-            "<pad>", "multiply", "by", "output", "carry", "final", "result",
-            "do", "nothing", "build", "using", "and", "add", "second",
-            "digit1", "digit2", "digit3", "digit4",
-            "carry1", "carry2", "carry3", "carry4",
-            "a_ones", "a_tens", "b_ones", "b_tens", "partial",
-        ]
-        numbers = [str(i) for i in range(100)]
-        tokens = base_tokens + numbers
+vocab = ["multiply", "add", "carry", "and", "combine", "do", "nothing", "subtract",
+         "output", "ones", "digit", "tens", "hundreds"
+         ] + [str(i) for i in range(10)]
+vocab = [w.lower() for w in vocab]
+vocab_size = len(vocab)
+vocab_dict = {word: idx for idx, word in enumerate(vocab)}
 
-        for idx, token in enumerate(tokens):
-            self.token2idx[token] = idx
-            self.idx2token[idx] = token
 
-    def encode(self, text):
-        tokens = text.lower().split()
-        return [self.token2idx.get(token, 0) for token in tokens]
+def preprocess(text):
+    text = text.lower()
+    for symbol in [":", "*", "+", "-", "="]:
+        text = text.replace(symbol, f" {symbol} ")
+    return text.split()
 
-    def decode(self, indices):
-        return " ".join([self.idx2token.get(idx, "<unk>") for idx in indices])
 
-    def __len__(self):
-        return len(self.token2idx)
+def encode_text(text):
+    tokens = preprocess(text)
+    vec = torch.zeros(vocab_size)
+    for token in tokens:
+        if token in vocab_dict:
+            vec[vocab_dict[token]] += 1.0
+    return vec
+
+
+def encode_state_text(problem_text, chain_text):
+    return torch.cat([encode_text(problem_text), encode_text(chain_text)])
