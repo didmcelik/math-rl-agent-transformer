@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.optim as optim
 import random
 import tkinter as tk
+from torch.nn import TransformerEncoder, TransformerEncoderLayer
+
 
 #############################################
 # Global Vocabulary and Text Processing
@@ -36,7 +38,6 @@ def encode_text(text):
 
 def encode_state_text(problem_text, chain_text):
    return torch.cat([encode_text(problem_text), encode_text(chain_text)])
-
 
 #############################################
 # Multiplication Module for Three-Digit x One-Digit
@@ -268,6 +269,7 @@ class AdditionEnvSimple:
        return self.get_state(), reward, done, ""
 
 
+
 #############################################
 # Composite Environment (Randomly Choose Task)
 #############################################
@@ -279,14 +281,10 @@ class CompositeMathEnv:
        self.reset()
 
    def reset(self):
-       #if random.random() < 0.5:
-       self.task = "mul"
-       self.env = MultiplicationEnvThree()
+        self.task = "add"
+        self.env = AdditionEnvSimple()
+        return self.env.get_state()
 
-       #else:
-         #  self.task = "add"
-        #   self.env = AdditionEnvSimple()
-       return self.env.get_state()
 
    def get_state(self):
        return self.env.get_state()
@@ -295,23 +293,33 @@ class CompositeMathEnv:
        return self.env.step(action_index)
 
 
-#############################################
-# Policy Network (for Procedure Learning)
-#############################################
 
-class PolicyNetwork(nn.Module):
-   def __init__(self, input_dim, hidden_dim, output_dim):
-       """
-       Input: concatenation of state vector (input_dim) and one-hot action vector (output_dim).
-       Output: scalar score.
-       """
-       super(PolicyNetwork, self).__init__()
-       self.fc1 = nn.Linear(input_dim + output_dim, hidden_dim)
-       self.fc2 = nn.Linear(hidden_dim, 1)
 
-   def forward(self, state_action):
-       x = torch.relu(self.fc1(state_action))
-       return self.fc2(x)
+#############################################
+# TransformerPolicyNetwork Network (for Procedure Learning)
+#############################################
+class TransformerPolicyNetwork(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim):
+        super(TransformerPolicyNetwork, self).__init__()
+        self.input_proj = nn.Linear(input_dim + output_dim, hidden_dim)
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=hidden_dim,
+            nhead=4,
+            dim_feedforward=hidden_dim * 4,
+            batch_first=True
+        )
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=2)
+
+        self.output_head = nn.Linear(hidden_dim, 1)
+
+    def forward(self, state_action):
+        x = self.input_proj(state_action)
+        x = x.unsqueeze(1)  # (batch, seq_len=1, hidden)
+        x = self.transformer_encoder(x)
+        x = x.squeeze(1)    # (batch, hidden)
+        score = self.output_head(x)
+        return score
 
 
 #############################################
@@ -322,7 +330,7 @@ class RLAgentSimple:
    def __init__(self, lr=1e-3, state_dim=2 * vocab_size, num_actions=5):
        self.num_actions = num_actions
        self.state_dim = state_dim
-       self.policy_net = PolicyNetwork(input_dim=state_dim, hidden_dim=64, output_dim=num_actions)
+       self.policy_net = TransformerPolicyNetwork(input_dim=state_dim, hidden_dim=64, output_dim=num_actions)
        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr)
        self.episode_log_probs = []
        self.cumulative_loss = 0.0
@@ -332,7 +340,7 @@ class RLAgentSimple:
        for action_index in range(env.num_actions):
            action_tensor = torch.zeros(env.num_actions)
            action_tensor[action_index] = 1.0
-           input_tensor = torch.cat([state, action_tensor])
+           input_tensor = torch.cat([state, action_tensor]).unsqueeze(0)
            score = self.policy_net(input_tensor)
            action_scores.append(score)
        scores_tensor = torch.stack(action_scores).view(-1)
@@ -362,7 +370,7 @@ class RLAgentSimple:
 
 def train_agent(num_episodes=5000):
    env = CompositeMathEnv()
-   agent = RLAgentSimple(lr=1e-3, state_dim=2 * vocab_size, num_actions=env.env.num_actions)
+   agent = RLAgentSimple()
    for episode in range(num_episodes):
        state = env.reset()
        done = False
@@ -474,7 +482,7 @@ class CompositeApp(tk.Tk):
 if __name__ == '__main__':
    print(
        "Training composite RL agent for addition and three-digit multiplication procedure (fully learned procedure without explicit arithmetic)...")
-   trained_agent = train_agent(num_episodes=20000)
+   trained_agent = train_agent(num_episodes=100)
    print("Training complete. Launching GUI.")
    app = CompositeApp(trained_agent)
    app.mainloop()
