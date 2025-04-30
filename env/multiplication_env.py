@@ -1,120 +1,87 @@
 import random
-from utils.vocab import Vocab
-from env.teacher_two_two import MultiplicationTeacherTwoTwo
 
-class MultiplicationEnvTwoTwo:
+from teacher.multiplication_teacher import MultiplicationTeacherThree
+from utils.vocab import encode_state_text
+
+
+def generate_multiplication_problem_three():
+    """
+    Generates a multiplication problem:
+      - A: three-digit number (100-999)
+      - M: one-digit number (1-9)
+    A human-like six-step procedure is created as follows:
+      1. "multiply <ones> by <M>"
+      2. "multiply <tens> by <M> with carry <carry1>"
+      3. "multiply <hundreds> by <M> with carry <carry2>"
+      4. "output ones digit: <d1>"
+      5. "output tens digit: <d2>"
+      6. "output hundreds digits: <P3>"
+    where the correct intermediate tokens are generated using arithmetic.
+
+    Note: The multiplication teacher will no longer recompute these values;
+          it only compares the agent’s chain (a sequence of text tokens) to the correct chain.
+    """
+    A = random.randint(100, 999)
+    M = random.randint(1, 9)
+    correct_answer = A * M
+    problem_text = f"mul: multiply {A} x {M}"
+
+    ones = A % 10
+    tens = (A // 10) % 10
+    hundreds = A // 100
+
+    # Step 1:
+    P1 = ones * M
+    d1 = P1 % 10
+    carry1 = P1 // 10
+    step1 = f"multiply {ones} by {M}"
+
+    # Step 2:
+    P2 = tens * M + carry1
+    d2 = P2 % 10
+    carry2 = P2 // 10
+    step2 = f"multiply {tens} by {M} with carry {carry1}"
+
+    # Step 3:
+    P3 = hundreds * M + carry2
+    step3 = f"multiply {hundreds} by {M} with carry {carry2}"
+
+    # Output steps:
+    step4 = f"output ones digit: {d1}"
+    step5 = f"output tens digit: {d2}"
+    step6 = f"output hundreds digits: {P3}"
+
+    # The correct procedure as a chain of strings (all lowercase)
+    correct_steps = [step1.lower(), step2.lower(), step3.lower(), step4.lower(), step5.lower(), step6.lower()]
+    # Allowed actions: the 6 correct ones, plus one extra dummy option to pad to a total of 7.
+    allowed_actions = correct_steps + ["dummy"]
+    return problem_text.lower(), allowed_actions, correct_steps, correct_answer, A, M
+
+
+class MultiplicationEnvThree:
     def __init__(self):
-        self.vocab = Vocab()
         self.reset()
 
     def reset(self):
-        self.A = random.randint(10, 99)
-        self.B = random.randint(10, 99)
-        self.problem_text = f"multiply {self.A} x {self.B}"
-        self.correct_answer = self.A * self.B
+        (self.problem_text, self.allowed_actions,
+         self.correct_steps, self.correct_answer, self.A, self.M) = generate_multiplication_problem_three()
+        self.num_actions = len(self.allowed_actions)  # 7 actions now
+        self.teacher = MultiplicationTeacherThree(self.correct_steps, self.correct_answer, self.A, self.M)
         self.chain = []
         self.chain_text = ""
-        self.steps = self.generate_steps()
-        self.allowed_actions = self.steps
-        self.current_step = 0
-        self.done = False
-
-        # NEW: Create teacher instance
-        self.teacher = MultiplicationTeacherTwoTwo(self.steps, self.correct_answer, self.A, self.B)
-
+        self.max_steps = len(self.correct_steps)  # 6 steps expected
         return self.get_state()
 
-    def generate_steps(self):
-        ones_A = self.A % 10
-        tens_A = self.A // 10
-        ones_B = self.B % 10
-        tens_B = self.B // 10
-
-        steps = []
-
-        # First row
-        P1 = ones_A * ones_B
-        digit1 = P1 % 10
-        carry1 = P1 // 10
-        steps.append(f"multiply A_ones {ones_A} by B_ones {ones_B} -> output digit1 {digit1}, carry1 {carry1}")
-
-        P2 = tens_A * ones_B
-        d2_intermediate = P2
-        d2_total = d2_intermediate + carry1
-        digit2 = d2_total % 10
-        carry2 = d2_total // 10
-        steps.append(
-            f"multiply A_tens {tens_A} by B_ones {ones_B} and add carry1 {carry1} -> output digit2 {digit2}, carry2 {carry2}")
-
-        # Build first partial result
-        first_row = carry2 * 100 + digit2 * 10 + digit1
-        steps.append(
-            f"build first partial result using carry2 {carry2}, digit2 {digit2}, and digit1 {digit1} -> {first_row}")
-
-        # Second row
-        P3 = ones_A * tens_B
-        digit3 = P3 % 10
-        carry3 = P3 // 10
-        steps.append(f"multiply A_ones {ones_A} by B_tens {tens_B} -> output digit3 {digit3}, carry3 {carry3}")
-
-        P4 = tens_A * tens_B
-        d4_intermediate = P4
-        d4_total = d4_intermediate + carry3
-        digit4 = d4_total % 10
-        carry4 = d4_total // 10
-        steps.append(
-            f"multiply A_tens {tens_A} by B_tens {tens_B} and add carry3 {carry3} -> output digit4 {digit4}, carry4 {carry4}")
-
-        # Build second partial result
-        second_row = (carry4 * 100 + digit4 * 10 + digit3) * 10
-        steps.append(
-            f"build second partial result using carry4 {carry4}, digit4 {digit4}, and digit3 {digit3} -> {second_row}")
-
-        # Add partial results
-        steps.append(f"add partial results {first_row} and {second_row}")
-
-        # Final result
-        steps.append(f"output final result")
-
-        return steps
-
     def get_state(self):
-        return self.problem_text, self.chain_text
+        return encode_state_text(self.problem_text, self.chain_text)
 
-    def step(self, action_text):
-        if self.done:
-            raise Exception("Episode is done. Please reset.")
-
-        self.chain.append(action_text)
-        self.chain_text = (self.chain_text + " " + action_text).strip()
-
+    def step(self, action_index):
+        action = self.allowed_actions[action_index]
+        self.chain.append(action)
+        self.chain_text = (self.chain_text + " " + action) if self.chain_text else action
+        done = (len(self.chain) >= self.max_steps)
         reward = 0.0
         current_step = len(self.chain) - 1
-        if current_step < len(self.steps):
-            expected_action = self.steps[current_step]
-            if action_text.strip().lower() == expected_action.strip().lower():
-                reward = 5.0
-            else:
-                reward = -2.0
-        else:
-            # Çoktan tüm adımlar bitti, ama agent hâlâ aksiyon basıyor
-            reward = -5.0
-
-        self.current_step += 1
-        done = (self.current_step >= len(self.steps))
-
-        if done:
-            feedback, teacher_reward = self.teacher.evaluate_solution(self.chain)
-            reward += teacher_reward
-            self.done = True
-
-        return self.get_state(), reward, done
-
-
-
-def test():
-    env = MultiplicationEnvTwoTwo()
-    env.reset()
-    for action in env.allowed_actions:
-        print(action)
-
+        if current_step < len(self.correct_steps):
+            reward = 5.0 if self.chain[current_step] == self.correct_steps[current_step] else -2.0
+        return self.get_state(), reward, done, ""
