@@ -1,118 +1,134 @@
-# Math RL Agent - 2x2 Multiplication
+# Transformer-based PPO Agent for Step-by-Step Arithmetic Reasoning
 
-This project implements a **Transformer-based Reinforcement Learning (RL) agent** that learns to **solve 2-digit × 2-digit multiplication problems step-by-step**.
-
-The agent is trained **without supervision** — it learns **only from external reward signals** by interacting with a custom-designed environment.
+This project implements a Transformer-based PPO (Proximal Policy Optimization) agent that learns to perform arithmetic tasks such as addition and multiplication by generating a sequence of reasoning steps. The agent operates in environments where each action corresponds to a natural language instruction like "multiply 7 by 3 with carry 1".
 
 ---
 
-## 🚀 Project Overview
+## 🔍 Overview
 
-- **Problem Type**: 2-digit × 2-digit multiplication (e.g., 34 × 76)
-- **Environment**: Generates random multiplication problems and checks solution steps.
-- **Agent**: A causal **Transformer model** that generates solution steps **token-by-token**.
-- **Learning Method**: Reinforcement Learning (Policy Gradient).
-
-The agent must learn to **multiply digits**, **manage carry values**, and **output the final result**, all without any labeled training data.
+- The agent is trained using PPO.
+- The policy network is based on a Transformer encoder.
+- Environments provide arithmetic problems with expected multi-step reasoning chains.
+- The agent must generate these chains through trial and error.
 
 ---
 
-## 🛠 Project Structure
+## 🤖 TransformerPolicy Network
 
-```
-math-rl-agent-transformer/
-│
-├── env/
-│   └── multiplication_env.py       # 2x2 multiplication environment with carry handling
-│
-├── model/
-│   └── transformer_policy.py        # Transformer model for step generation
-│
-├── utils/
-│   └── vocab.py                     # Vocabulary management (tokenization)
-│
-├── agent/
-│   └── rl_agent.py                   # RL agent controlling the transformer
-│
-├── train/
-│   └── train_agent.py                # Training and testing functions
-│
-├── main.py                           # Entry point to run training or testing
-│
-├── README.md                         # Project description
-│
-└── requirements.txt                  # Python package requirements
+`TransformerPolicy` is a PyTorch module that maps a bag-of-words input vector (concatenated problem text + current chain text) to:
+
+- Action probabilities: `policy_head`
+- State value estimation: `value_head`
+
+### Forward Pass:
+```python
+x = self.embedding(x)           # Linear projection
+x = x.unsqueeze(0)              # Add sequence dimension
+x = self.transformer(x)         # Transformer encoder processes input
+x = x.squeeze(0)
+action_probs = softmax(policy_head(x))
+state_value = value_head(x)
 ```
 
----
-
-## 📋 How It Works
-
-1. **Environment** generates a random 2x2 multiplication problem.
-2. **Transformer agent** observes the problem and past steps.
-3. At each step, the agent **generates the next action** (e.g., `"multiply 4 by 6 output 4 carry 2"`).
-4. The environment **evaluates** the action and provides a **reward**:
-   - +1 for correct steps
-   - -0.5 for incorrect steps
-5. The agent **updates its policy** to maximize expected rewards over time.
+Although the input is not sequential (it's a dense vector), the Transformer still models contextual relationships across dimensions.
 
 ---
 
-## 🧑‍💻 Key Components
+## 🏃 PPOAgent Training Flow
 
-| Component | Description |
-|:----------|:------------|
-| Environment | Generates problems, defines correct step sequences, gives rewards. |
-| Transformer Policy | Predicts the next token in the solution step. |
-| RL Agent | Samples actions and updates policy using rewards. |
-| Vocab | Encodes/decodes textual actions into token IDs. |
+In `train()`:
+
+1. A batch is sampled from memory.
+2. The Transformer processes states to predict:
+   - `action_probs` for computing new log probabilities.
+   - `state_values` for computing advantages.
+3. PPO loss is calculated:
+   - **Policy loss**: encourages better actions.
+   - **Value loss**: trains the value head.
+   - **Entropy**: encourages exploration.
+
+```python
+action_probs, state_values = self.policy(states)
+...
+loss = policy_loss + 0.5 * value_loss - 0.01 * entropy
+loss.backward()
+optimizer.step()
+```
+
+The Transformer is optimized end-to-end with PPO.
 
 ---
 
-## 📈 Training
+## 📊 Policy Evaluation in Action
 
-You can train the agent using the reinforcement learning loop provided.
+During evaluation:
+- The agent constructs a `test_chain` step by step.
+- At each step, the Transformer-based policy predicts the most probable next action.
+- The environment compares the chain to the expected steps and returns feedback.
 
+Example:
+```python
+action, _ = agent.select_action(state)
+state, reward, done, feedback = env.step(action)
+test_chain.append(env.allowed_actions[action])
+```
+
+---
+
+## ✨ Why Use a Transformer?
+
+| MLP                            | Transformer                                   |
+|-------------------------------|-----------------------------------------------|
+| No context modeling           | Learns relationships between text features    |
+| Weak for long dependencies    | Good at modeling reasoning chains             |
+| Static processing             | Adaptive attention across input dimensions    |
+
+Even without token sequences, the Transformer benefits from richer, contextual representation of the arithmetic state.
+
+---
+
+## 🔧 Project Structure (Simplified)
+```
+agent/
+   rl_agent_transformer.py
+env/
+   addition_env.py
+   multiplication_env.py
+model/
+   transformer_policy.py
+teacher/
+   addition_teacher.py
+   multiplication_teacher.py
+train/
+   train_agent_addition.py
+utils/
+   vocab.py
+main.py
+```
+
+---
+
+## 🔹 Usage
+
+To train the agent:
 ```bash
 python main.py
 ```
 
-This will:
-- Initialize the agent and environment.
-- Train the agent for a given number of episodes.
-- Display example problems and the agent's generated solution steps.
-
-*Note:* Training purely via RL can be slow due to sparse rewards. Supervised pretraining is recommended for faster convergence.
+Training and test output will display the predicted chain vs. expected solution.
 
 ---
 
-## ⚙️ Requirements
+## 📃 Requirements
+```
+torch
+numpy
+matplotlib
+```
 
-- Python 3.8+
-- PyTorch
-
-Install the requirements:
-
+Install with:
 ```bash
 pip install -r requirements.txt
 ```
 
 ---
-
-## 📢 Future Improvements (Optional)
-
-- **Supervised Pretraining**: Train the agent first using correct step sequences before switching to RL.
-- **Curriculum Learning**: Start with simpler problems, gradually increase difficulty.
-- **Beam Search**: Improve action selection during inference.
-- **Reward Shaping**: Provide partial rewards for partially correct steps.
-
----
-
-## 📄 License
-
-This project is for educational and research purposes.
-
----
-
-# ✨ Good luck training your math RL agent! 🚀
-
